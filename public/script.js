@@ -131,3 +131,41 @@ function syncVideo(msg) {
         isSyncing = false;
     }, 500);
 }
+
+// Socket.io Signaling Events (Restored)
+socket.on('offer', (offer) => {
+    if (!isInitiator && !peerConnection) {
+        createPeerConnection();
+    }
+    peerConnection.setRemoteDescription(new RTCSessionDescription(offer))
+        .then(() => {
+            // Process queued candidates
+            while (candidateQueue.length > 0) {
+                const candidate = candidateQueue.shift();
+                peerConnection.addIceCandidate(candidate).catch(e => console.error('Error adding queued candidate:', e));
+            }
+            if (!isInitiator) {
+                createAnswer();
+            }
+        });
+});
+
+socket.on('answer', (answer) => {
+    peerConnection.setRemoteDescription(new RTCSessionDescription(answer))
+        .then(() => {
+            // Process queued candidates
+            while (candidateQueue.length > 0) {
+                const candidate = candidateQueue.shift();
+                peerConnection.addIceCandidate(candidate).catch(e => console.error('Error adding queued candidate:', e));
+            }
+        });
+});
+
+socket.on('candidate', (candidate) => {
+    const iceCandidate = new RTCIceCandidate(candidate);
+    if (peerConnection && peerConnection.remoteDescription && peerConnection.remoteDescription.type) {
+        peerConnection.addIceCandidate(iceCandidate).catch(e => console.error('Error adding candidate:', e));
+    } else {
+        candidateQueue.push(iceCandidate);
+    }
+});
