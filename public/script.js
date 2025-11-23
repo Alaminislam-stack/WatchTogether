@@ -23,25 +23,6 @@ const config = {
     ]
 };
 
-// Debug Logger
-const debugDiv = document.getElementById('debugLog');
-function log(msg) {
-    if (debugDiv) {
-        debugDiv.innerHTML += `<div>${new Date().toLocaleTimeString()} - ${msg}</div>`;
-        debugDiv.scrollTop = debugDiv.scrollHeight;
-    }
-}
-// Replace console.log with our log function for critical parts
-const originalLog = console.log;
-console.log = function (...args) {
-    originalLog.apply(console, args);
-    log(args.join(' '));
-};
-console.error = function (...args) {
-    originalLog.apply(console, args);
-    log('ERROR: ' + args.join(' '));
-};
-
 // DOM Elements
 const videoUrlInput = document.getElementById('videoUrl');
 const loadBtn = document.getElementById('loadBtn');
@@ -242,93 +223,83 @@ socket.on('candidate', (candidate) => {
 
 // Listen for Socket.io relayed data
 socket.on('app-data', (msg) => {
-    log('Received data message via Socket.io');
     handleDataMessage(msg);
 });
 
 // WebRTC Logic
 function createPeerConnection() {
-    log('Creating RTCPeerConnection');
     try {
         peerConnection = new RTCPeerConnection(config);
 
         peerConnection.onicecandidate = (event) => {
             if (event.candidate) {
-                log('Found ICE candidate');
                 socket.emit('candidate', event.candidate, roomName);
             }
         };
 
         peerConnection.onconnectionstatechange = () => {
-            log('Connection state: ' + peerConnection.connectionState);
+            console.log('Connection state: ' + peerConnection.connectionState);
             if (peerConnection.connectionState === 'connected') {
                 statusSpan.textContent = 'Status: Connected (P2P)';
+            } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+                statusSpan.textContent = 'Status: Connected (Server Relay)';
+                console.log('WebRTC failed, switching to Server Relay fallback');
             }
         };
 
         if (!isInitiator) {
-            log('Setting up Data Channel listener');
             peerConnection.ondatachannel = (event) => {
-                log('Data Channel received from remote');
                 dataChannel = event.channel;
                 setupDataChannel();
             };
         }
     } catch (e) {
-        log('Error creating PeerConnection: ' + e);
+        console.error('Error creating PeerConnection: ' + e);
     }
 }
 
 function createDataChannel() {
-    log('Creating Data Channel');
     try {
         dataChannel = peerConnection.createDataChannel('chat');
         setupDataChannel();
     } catch (e) {
-        log('Error creating Data Channel: ' + e);
+        console.error('Error creating Data Channel: ' + e);
     }
 }
 
 function setupDataChannel() {
     dataChannel.onopen = () => {
-        log('Data channel open');
+        console.log('Data channel open');
         statusSpan.textContent = 'Status: Connected (Data Channel Open)';
         dataChannel.send(JSON.stringify({ type: 'request-sync' }));
     };
 
     dataChannel.onmessage = (event) => {
-        log('Received data message via WebRTC');
         const msg = JSON.parse(event.data);
         handleDataMessage(msg);
     };
 }
 
 function createOffer() {
-    log('Creating Offer');
     peerConnection.createOffer()
         .then(offer => {
-            log('Offer created, setting local description');
             return peerConnection.setLocalDescription(offer);
         })
         .then(() => {
-            log('Local description set, sending offer');
             socket.emit('offer', peerConnection.localDescription, roomName);
         })
-        .catch(e => log('Error creating offer: ' + e));
+        .catch(e => console.error('Error creating offer: ' + e));
 }
 
 function createAnswer() {
-    log('Creating Answer');
     peerConnection.createAnswer()
         .then(answer => {
-            log('Answer created, setting local description');
             return peerConnection.setLocalDescription(answer);
         })
         .then(() => {
-            log('Local description set, sending answer');
             socket.emit('answer', peerConnection.localDescription, roomName);
         })
-        .catch(e => log('Error creating answer: ' + e));
+        .catch(e => console.error('Error creating answer: ' + e));
 }
 
 function handleDataMessage(msg) {
