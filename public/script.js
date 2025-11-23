@@ -70,14 +70,19 @@ function onPlayerReady(event) {
 
 function onPlayerStateChange(event) {
     if (isSyncing) return;
+    const state = event.data;
+    const time = player.getCurrentTime();
+    const msg = {
+        type: 'video-sync',
+        state: state,
+        time: time
+    };
+    // Send via Socket.io (Reliable)
+    socket.emit('app-data', msg, roomName);
+
+    // Also try Data Channel (Best Effort)
     if (dataChannel && dataChannel.readyState === 'open') {
-        const state = event.data;
-        const time = player.getCurrentTime();
-        dataChannel.send(JSON.stringify({
-            type: 'video-sync',
-            state: state,
-            time: time
-        }));
+        dataChannel.send(JSON.stringify(msg));
     }
 }
 
@@ -94,12 +99,16 @@ loadBtn.addEventListener('click', () => {
     if (videoId) {
         if (player && typeof player.loadVideoById === 'function') {
             player.loadVideoById(videoId);
+            const msg = {
+                type: 'load-video',
+                videoId: videoId,
+                url: url
+            };
+            // Send via Socket.io
+            socket.emit('app-data', msg, roomName);
+
             if (dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify({
-                    type: 'load-video',
-                    videoId: videoId,
-                    url: url
-                }));
+                dataChannel.send(JSON.stringify(msg));
             }
         } else {
             console.error('Player not ready');
@@ -122,14 +131,19 @@ msgInput.addEventListener('keypress', (e) => {
 
 function sendMessage() {
     const text = msgInput.value.trim();
-    if (text && dataChannel && dataChannel.readyState === 'open') {
+    if (text) {
         const message = {
             type: 'chat',
             text: text,
             timestamp: new Date().toLocaleTimeString(),
             user: 'Me'
         };
-        dataChannel.send(JSON.stringify(message));
+        // Send via Socket.io
+        socket.emit('app-data', message, roomName);
+
+        if (dataChannel && dataChannel.readyState === 'open') {
+            dataChannel.send(JSON.stringify(message));
+        }
         appendMessage(message, 'local');
         msgInput.value = '';
     }
@@ -226,64 +240,95 @@ socket.on('candidate', (candidate) => {
     }
 });
 
+// Listen for Socket.io relayed data
+socket.on('app-data', (msg) => {
+    log('Received data message via Socket.io');
+    handleDataMessage(msg);
+});
+
 // WebRTC Logic
 function createPeerConnection() {
-    peerConnection = new RTCPeerConnection(config);
+    log('Creating RTCPeerConnection');
+    try {
+        peerConnection = new RTCPeerConnection(config);
 
-    peerConnection.onicecandidate = (event) => {
-        if (event.candidate) {
-            socket.emit('candidate', event.candidate, roomName);
-        }
-    };
-
-    peerConnection.onconnectionstatechange = () => {
-        if (peerConnection.connectionState === 'connected') {
-            statusSpan.textContent = 'Status: Connected (P2P)';
-        }
-    };
-
-    if (!isInitiator) {
-        peerConnection.ondatachannel = (event) => {
-            dataChannel = event.channel;
-            setupDataChannel();
+        peerConnection.onicecandidate = (event) => {
+            if (event.candidate) {
+                log('Found ICE candidate');
+                socket.emit('candidate', event.candidate, roomName);
+            }
         };
+
+        peerConnection.onconnectionstatechange = () => {
+            log('Connection state: ' + peerConnection.connectionState);
+            if (peerConnection.connectionState === 'connected') {
+                statusSpan.textContent = 'Status: Connected (P2P)';
+            }
+        };
+
+        if (!isInitiator) {
+            log('Setting up Data Channel listener');
+            peerConnection.ondatachannel = (event) => {
+                log('Data Channel received from remote');
+                dataChannel = event.channel;
+                setupDataChannel();
+            };
+        }
+    } catch (e) {
+        log('Error creating PeerConnection: ' + e);
     }
 }
 
 function createDataChannel() {
-    dataChannel = peerConnection.createDataChannel('chat');
-    setupDataChannel();
+    log('Creating Data Channel');
+    try {
+        dataChannel = peerConnection.createDataChannel('chat');
+        setupDataChannel();
+    } catch (e) {
+        log('Error creating Data Channel: ' + e);
+    }
 }
 
 function setupDataChannel() {
     dataChannel.onopen = () => {
-        console.log('Data channel open');
+        log('Data channel open');
         statusSpan.textContent = 'Status: Connected (Data Channel Open)';
         dataChannel.send(JSON.stringify({ type: 'request-sync' }));
     };
 
     dataChannel.onmessage = (event) => {
+        log('Received data message via WebRTC');
         const msg = JSON.parse(event.data);
         handleDataMessage(msg);
     };
 }
 
 function createOffer() {
+    log('Creating Offer');
     peerConnection.createOffer()
-        .then(offer => peerConnection.setLocalDescription(offer))
+        .then(offer => {
+            log('Offer created, setting local description');
+            return peerConnection.setLocalDescription(offer);
+        })
         .then(() => {
+            log('Local description set, sending offer');
             socket.emit('offer', peerConnection.localDescription, roomName);
         })
-        .catch(e => console.error(e));
+        .catch(e => log('Error creating offer: ' + e));
 }
 
 function createAnswer() {
+    log('Creating Answer');
     peerConnection.createAnswer()
-        .then(answer => peerConnection.setLocalDescription(answer))
+        .then(answer => {
+            log('Answer created, setting local description');
+            return peerConnection.setLocalDescription(answer);
+        })
         .then(() => {
+            log('Local description set, sending answer');
             socket.emit('answer', peerConnection.localDescription, roomName);
         })
-        .catch(e => console.error(e));
+        .catch(e => log('Error creating answer: ' + e));
 }
 
 function handleDataMessage(msg) {
@@ -309,7 +354,11 @@ function handleDataMessage(msg) {
                     state: player.getPlayerState(),
                     url: videoUrlInput.value
                 };
-                dataChannel.send(JSON.stringify(response));
+                // Send via Socket.io
+                socket.emit('app-data', response, roomName);
+                if (dataChannel && dataChannel.readyState === 'open') {
+                    dataChannel.send(JSON.stringify(response));
+                }
             }
         }
     } else if (msg.type === 'sync-response') {

@@ -40,6 +40,11 @@ io.on('connection', (socket) => {
         }
     });
 
+    // Relay events (Fallback for when WebRTC fails)
+    socket.on('app-data', (data, roomName) => {
+        socket.to(roomName).emit('app-data', data);
+    });
+
     // Signaling events
     socket.on('offer', (offer, roomName) => {
         socket.to(roomName).emit('offer', offer);
