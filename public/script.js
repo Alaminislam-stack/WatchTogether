@@ -26,7 +26,6 @@ const config = {
 // Debug Logger
 const debugDiv = document.getElementById('debugLog');
 function log(msg) {
-    console.log(msg);
     if (debugDiv) {
         debugDiv.innerHTML += `<div>${new Date().toLocaleTimeString()} - ${msg}</div>`;
         debugDiv.scrollTop = debugDiv.scrollHeight;
