@@ -58,13 +58,7 @@ function onPlayerStateChange(event) {
         state: state,
         time: time
     };
-    // Send via Socket.io (Reliable)
-    socket.emit('app-data', msg, roomName);
-
-    // Also try Data Channel (Best Effort)
-    if (dataChannel && dataChannel.readyState === 'open') {
-        dataChannel.send(JSON.stringify(msg));
-    }
+    sendData(msg);
 }
 
 // Load YouTube API
@@ -85,12 +79,7 @@ loadBtn.addEventListener('click', () => {
                 videoId: videoId,
                 url: url
             };
-            // Send via Socket.io
-            socket.emit('app-data', msg, roomName);
-
-            if (dataChannel && dataChannel.readyState === 'open') {
-                dataChannel.send(JSON.stringify(msg));
-            }
+            sendData(msg);
         } else {
             console.error('Player not ready');
         }
@@ -119,12 +108,7 @@ function sendMessage() {
             timestamp: new Date().toLocaleTimeString(),
             user: 'Me'
         };
-        // Send via Socket.io
-        socket.emit('app-data', message, roomName);
-
-        if (dataChannel && dataChannel.readyState === 'open') {
-            dataChannel.send(JSON.stringify(message));
-        }
+        sendData(message);
         appendMessage(message, 'local');
         msgInput.value = '';
     }
@@ -325,11 +309,7 @@ function handleDataMessage(msg) {
                     state: player.getPlayerState(),
                     url: videoUrlInput.value
                 };
-                // Send via Socket.io
-                socket.emit('app-data', response, roomName);
-                if (dataChannel && dataChannel.readyState === 'open') {
-                    dataChannel.send(JSON.stringify(response));
-                }
+                sendData(response);
             }
         }
     } else if (msg.type === 'sync-response') {
@@ -364,4 +344,12 @@ function syncVideo(msg) {
     setTimeout(() => {
         isSyncing = false;
     }, 500);
+}
+
+function sendData(msg) {
+    if (dataChannel && dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify(msg));
+    } else {
+        socket.emit('app-data', msg, roomName);
+    }
 }
